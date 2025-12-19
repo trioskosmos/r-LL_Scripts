@@ -558,11 +558,7 @@ function syncFromInbox() {
 
   // 4. Run Analysis automatically
   try {
-    runFullAnalysis();
-    runHotTakesAnalysis();
-    runMoreAnalysis();
-    runSpiceAnalysis();
-    ss.toast("Sync & All Analyses Complete!");
+    runAllAnalysis();
   } catch (e) {
     ss.toast("Sync finished, but analysis encountered an error.");
   }

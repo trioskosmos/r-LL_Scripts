@@ -173,8 +173,29 @@ function runFullAnalysis() {
 
             let lmHeader = [['User Name', ...res.userNames]];
             let lmRows = res.userNames.map(u1 => [u1, ...res.userNames.map(u2 => res.matrix[u1][u2].toFixed(2))]);
-            oppsSheet.getRange(cursor, 1, 1, lmHeader[0].length).setValues(lmHeader).setBackground('#eeeeee').setFontWeight('bold');
-            oppsSheet.getRange(cursor + 1, 1, lmRows.length, lmRows[0].length).setValues(lmRows);
+            let lmRange = oppsSheet.getRange(cursor, 1, 1, lmHeader[0].length);
+            lmRange.setValues(lmHeader).setBackground('#eeeeee').setFontWeight('bold');
+
+            let dataRange = oppsSheet.getRange(cursor + 1, 1, lmRows.length, lmRows[0].length);
+            dataRange.setValues(lmRows);
+
+            // Apply Gradient to Matrix (Red=High Div, Green=Low Div)
+            let colors = lmRows.map(row => row.map((val, cIdx) => {
+                if (cIdx === 0) return '#ffffff'; // Username column
+                let v = parseFloat(val);
+                // Assume divergence ranges roughly 0 to 40? 
+                // Let's create a dynamic range if possible, or fixed for stability.
+                // Fixed: 0 (Green) -> 20 (White) -> 40 (Red)
+                if (v >= 20) {
+                    let r = Math.min((v - 20) / 20, 1);
+                    return getGradientColor(r, 0, 1, '#ffffff', '#ea9999');
+                } else {
+                    let r = Math.min((20 - v) / 20, 1);
+                    return getGradientColor(r, 0, 1, '#ffffff', '#b6d7a8');
+                }
+            }));
+            dataRange.setBackgrounds(colors);
+
             cursor += lmRows.length + 2;
 
             oppsSheet.getRange(cursor, 1, 1, 5).setValues([['User', 'Rival (Most Diff)', 'Score', 'Friend (Least Diff)', 'Score']]).setBackground('#f3f3f3').setFontStyle('italic');
@@ -1120,6 +1141,9 @@ function getSpiceMeterAnalysis(allData, configs, ss) {
 
     const resultHeaders = [['User', 'Global Spice (Avg)', ...groupNames]];
 
+    const maxSpice = rows.length > 0 ? parseFloat(rows[0][1]) : 1;
+    const minSpice = rows.length > 0 ? parseFloat(rows[rows.length - 1][1]) : 0;
+
     return {
         title: 'THE SPICE METER (Group Breakdown)',
         description: 'Global Spice is the average of your scores across all groups. Higher = More Unique taste.',
@@ -1127,12 +1151,27 @@ function getSpiceMeterAnalysis(allData, configs, ss) {
         headers: resultHeaders,
         headerBgColor: '#fdebd0',
         rows: rows,
-        rowBgColors: rows.map((row, idx) => {
-            const total = rows.length;
-            // idx 0 is highest spice (rank 1)
-            if (idx < total * 0.25) return '#ffcccc'; // Top 25% Spicy
-            if (idx >= total * 0.75) return '#cceeff'; // Bottom 25% Basic
-            return '#ffffff';
+        rowBgColors: rows.map(row => {
+            const val = parseFloat(row[1]);
+            // Gradient: Max(Spicy/Red) -> Min(Basic/Blue)
+            // Midpoint is average or median, but let's just lerp between Max and Min for simplicity
+            // or use specific thresholds if preferred. Let's use relative positioning.
+
+            // Map value to 0-1 range (1 = max spice, 0 = min spice)
+            const ratio = (val - minSpice) / (maxSpice - minSpice || 1);
+
+            // If ratio > 0.5 interpolate White -> Red
+            // If ratio < 0.5 interpolate Blue -> White
+
+            if (ratio > 0.5) {
+                // 0.5 -> 1.0 (0% -> 100% Red intensity)
+                const intensity = (ratio - 0.5) * 2;
+                return getGradientColor(intensity, 0, 1, '#ffffff', '#ff9999');
+            } else {
+                // 0.0 -> 0.5 (100% -> 0% Blue intensity)
+                const intensity = (0.5 - ratio) * 2;
+                return getGradientColor(intensity, 0, 1, '#ffffff', '#cceeff');
+            }
         })
     };
 }
@@ -1165,6 +1204,31 @@ function writeTakesHorizontalBatch(sheet, startRow, startCol, takes) {
 function updateCount(obj, user, type) {
     if (!obj[user]) obj[user] = { most: 0, least: 0 };
     obj[user][type]++;
+    obj[user][type]++;
+}
+
+/**
+ * Helper: Interpolate between two hex colors
+ * factor: 0.0 to 1.0
+ */
+function getGradientColor(factor, min, max, startHex, endHex) {
+    if (factor < min) factor = min;
+    if (factor > max) factor = max;
+
+    // Normalize factor to 0-1
+    let t = (factor - min) / (max - min);
+
+    const f = parseInt(startHex.slice(1), 16);
+    const tHex = parseInt(endHex.slice(1), 16);
+
+    const R1 = f >> 16, G1 = f >> 8 & 0x00FF, B1 = f & 0x00FF;
+    const R2 = tHex >> 16, G2 = tHex >> 8 & 0x00FF, B2 = tHex & 0x00FF;
+
+    const R = Math.round(R1 + (R2 - R1) * t);
+    const G = Math.round(G1 + (G2 - G1) * t);
+    const B = Math.round(B1 + (B2 - B1) * t);
+
+    return "#" + (0x1000000 + (R << 16) + (G << 8) + B).toString(16).slice(1);
 }
 
 /**
