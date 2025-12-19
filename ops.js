@@ -1040,12 +1040,12 @@ function runSpiceAnalysis() {
 // FEATURE 9: THE SPICE METER
 // ============================================
 function getSpiceMeterAnalysis(allData, configs, ss) {
-    const userRMSPerGroup = {}; // { user: { groupName: sqDiffs[], overallSqDiffs: [] } }
+    const userRMSPerGroup = {}; // { user: { groupName: sqDiffs[] } }
     const groupNames = configs.map(c => c.tabName);
     const allUniqueUsers = Object.keys(allData.userRanks);
 
     allUniqueUsers.forEach(user => {
-        userRMSPerGroup[user] = { overallSqDiffs: [] };
+        userRMSPerGroup[user] = {};
         groupNames.forEach(gn => userRMSPerGroup[user][gn] = []);
     });
 
@@ -1083,9 +1083,8 @@ function getSpiceMeterAnalysis(allData, configs, ss) {
                     const avgOther = otherRanks.reduce((a, b) => a + b, 0) / otherRanks.length;
                     const sqDiff = Math.pow(userRankObj.rank - avgOther, 2);
 
-                    if (userRMSPerGroup[userRankObj.user]) {
+                    if (userRMSPerGroup[userRankObj.user] && userRMSPerGroup[userRankObj.user][groupName]) {
                         userRMSPerGroup[userRankObj.user][groupName].push(sqDiff);
-                        userRMSPerGroup[userRankObj.user].overallSqDiffs.push(sqDiff);
                     }
                 });
             }
@@ -1093,43 +1092,45 @@ function getSpiceMeterAnalysis(allData, configs, ss) {
     });
 
     const rows = allUniqueUsers.map(user => {
-        const rowData = [user];
-        let overallRMS = 0;
+        const validGroupScores = [];
 
-        if (userRMSPerGroup[user].overallSqDiffs.length > 0) {
-            overallRMS = Math.sqrt(userRMSPerGroup[user].overallSqDiffs.reduce((a, b) => a + b, 0) / userRMSPerGroup[user].overallSqDiffs.length);
-        }
-        rowData.push(overallRMS.toFixed(1));
-
-        groupNames.forEach(gn => {
+        const groupCols = groupNames.map(gn => {
             const diffs = userRMSPerGroup[user][gn];
             if (diffs && diffs.length > 0) {
                 const rms = Math.sqrt(diffs.reduce((a, b) => a + b, 0) / diffs.length);
-                rowData.push(rms.toFixed(1));
+                validGroupScores.push(rms);
+                return rms.toFixed(1);
             } else {
-                rowData.push("-");
+                return "-";
             }
         });
 
-        return rowData;
+        // Global Spice = Average of Group Spice Scores
+        let globalSpice = 0;
+        if (validGroupScores.length > 0) {
+            globalSpice = validGroupScores.reduce((a, b) => a + b, 0) / validGroupScores.length;
+        }
+
+        // Final row format: [User, Global, Group1, Group2...]
+        return [user, globalSpice.toFixed(1), ...groupCols];
     });
 
-    // Sort by overall RMS (Spiciest at top)
+    // Sort by global score (Highest Spice at top)
     rows.sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
 
-    const resultHeaders = [['User', 'Global Spice', ...groupNames]];
+    const resultHeaders = [['User', 'Global Spice (Avg)', ...groupNames]];
 
     return {
         title: 'THE SPICE METER (Group Breakdown)',
-        description: 'Root Mean Squared deviation from others. Higher = More Unique.',
+        description: 'Global Spice is the average of your scores across all groups. Higher = More Unique taste.',
         titleColor: '#e67e22',
         headers: resultHeaders,
         headerBgColor: '#fdebd0',
         rows: rows,
         rowBgColors: rows.map(row => {
             const overall = parseFloat(row[1]);
-            if (overall > 35) return '#ffcccc'; // Spicy
-            if (overall < 15) return '#cceeff'; // Basic
+            if (overall > 32) return '#ffcccc'; // Spicy
+            if (overall < 18) return '#cceeff'; // Basic
             return '#ffffff';
         })
     };
