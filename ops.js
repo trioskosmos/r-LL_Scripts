@@ -173,8 +173,29 @@ function runFullAnalysis() {
 
             let lmHeader = [['User Name', ...res.userNames]];
             let lmRows = res.userNames.map(u1 => [u1, ...res.userNames.map(u2 => res.matrix[u1][u2].toFixed(2))]);
-            oppsSheet.getRange(cursor, 1, 1, lmHeader[0].length).setValues(lmHeader).setBackground('#eeeeee').setFontWeight('bold');
-            oppsSheet.getRange(cursor + 1, 1, lmRows.length, lmRows[0].length).setValues(lmRows);
+            let lmRange = oppsSheet.getRange(cursor, 1, 1, lmHeader[0].length);
+            lmRange.setValues(lmHeader).setBackground('#eeeeee').setFontWeight('bold');
+
+            let dataRange = oppsSheet.getRange(cursor + 1, 1, lmRows.length, lmRows[0].length);
+            dataRange.setValues(lmRows);
+
+            // Apply Gradient to Matrix (Red=High Div, Green=Low Div)
+            let colors = lmRows.map(row => row.map((val, cIdx) => {
+                if (cIdx === 0) return '#ffffff'; // Username column
+                let v = parseFloat(val);
+                // Assume divergence ranges roughly 0 to 40? 
+                // Let's create a dynamic range if possible, or fixed for stability.
+                // Fixed: 0 (Green) -> 20 (White) -> 40 (Red)
+                if (v >= 20) {
+                    let r = Math.min((v - 20) / 20, 1);
+                    return getGradientColor(r, 0, 1, '#ffffff', '#ea9999');
+                } else {
+                    let r = Math.min((20 - v) / 20, 1);
+                    return getGradientColor(r, 0, 1, '#ffffff', '#b6d7a8');
+                }
+            }));
+            dataRange.setBackgrounds(colors);
+
             cursor += lmRows.length + 2;
 
             oppsSheet.getRange(cursor, 1, 1, 5).setValues([['User', 'Rival (Most Diff)', 'Score', 'Friend (Least Diff)', 'Score']]).setBackground('#f3f3f3').setFontStyle('italic');
@@ -1036,4 +1057,47 @@ function writeTakesHorizontalBatch(sheet, startRow, startCol, takes) {
 function updateCount(obj, user, type) {
     if (!obj[user]) obj[user] = { most: 0, least: 0 };
     obj[user][type]++;
+    obj[user][type]++;
+}
+
+/**
+ * Helper: Interpolate between two hex colors
+ * factor: 0.0 to 1.0
+ */
+function getGradientColor(factor, min, max, startHex, endHex) {
+    if (factor < min) factor = min;
+    if (factor > max) factor = max;
+
+    // Normalize factor to 0-1
+    let t = (factor - min) / (max - min);
+
+    const f = parseInt(startHex.slice(1), 16);
+    const tHex = parseInt(endHex.slice(1), 16);
+
+    const R1 = f >> 16, G1 = f >> 8 & 0x00FF, B1 = f & 0x00FF;
+    const R2 = tHex >> 16, G2 = tHex >> 8 & 0x00FF, B2 = tHex & 0x00FF;
+
+    const R = Math.round(R1 + (R2 - R1) * t);
+    const G = Math.round(G1 + (G2 - G1) * t);
+    const B = Math.round(B1 + (B2 - B1) * t);
+
+    return "#" + (0x1000000 + (R << 16) + (G << 8) + B).toString(16).slice(1);
+}
+
+/**
+ * MAIN: Runs ALL analysis functions in sequence.
+ */
+function runAllAnalysis() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast("Starting full analysis suite...");
+    try {
+        runFullAnalysis();
+        runHotTakesAnalysis();
+        runMoreAnalysis();
+        runSpiceAnalysis();
+        ss.toast("All Analysis Completed Successfully!");
+    } catch (e) {
+        console.error(e);
+        ss.toast("Error during analysis (check logs).");
+    }
 }
