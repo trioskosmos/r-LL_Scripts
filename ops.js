@@ -863,55 +863,62 @@ function getOutlierUsers(allData, configs, ss) {
 // ============================================
 function getComebackSongs(allData) {
     const sleepers = [];
-
+    
     Object.keys(allData.songs).forEach(songName => {
         const song = allData.songs[songName];
         const avgRank = song.avgRank;
-
+        
         let maxLover = null;
         let minRank = Infinity;
-
+        
         song.ranks.forEach(rankObj => {
             if (rankObj.rank < minRank) {
                 minRank = rankObj.rank;
                 maxLover = rankObj.user;
             }
         });
-
-        if (maxLover && minRank < 30 && avgRank > 60) {
+        
+        // Calculate MRR for this song
+        const mrr = song.ranks.reduce((sum, r) => sum + (1 / (1 + r.rank)), 0) / song.ranks.length;
+        
+        // Filter: underrated (high avg) + someone loves it (low minRank) + decent MRR
+        if (maxLover && minRank < 30 && avgRank > 60 && mrr > 0.05) {
             sleepers.push({
                 song: songName,
                 avgRank: avgRank,
                 maxLover: maxLover,
                 theirRank: minRank,
-                gap: (avgRank - minRank).toFixed(0)
+                gap: (avgRank - minRank),
+                mrr: mrr
             });
         }
     });
-
-    sleepers.sort((a, b) => b.gap - a.gap);
-    const topSleepers = sleepers.slice(0, 20);
-
+    
+    // Sort by MRR first (shows songs with stronger lovers), then gap
+    sleepers.sort((a, b) => b.mrr - a.mrr || b.gap - a.gap);
+    const topSleepers = sleepers.slice(0, 15);
+    
     const rows = topSleepers.map((s, idx) => [
         idx + 1,
         s.song,
         s.avgRank.toFixed(1),
         s.maxLover,
         s.theirRank,
-        s.gap
+        s.gap.toFixed(0),
+        s.mrr.toFixed(2)
     ]);
-
+    
     return {
-        title: 'SLEEPER SONGS (songs loved by at least one user but not by many)',
+        title: 'COMEBACK SONGS',
         description: 'Underrated gems loved by at least one user',
         titleColor: '#27ae60',
-        headers: [['Rank', 'Song', 'Avg Rank', 'Lover', 'Their Rank', 'Gap']],
+        headers: [['Rank', 'Song', 'Avg Rank', 'Lover', 'Their Rank', 'Gap', 'MRR']],
         headerBgColor: '#d5f4e6',
         rows: rows,
         rowBgColors: rows.map(row => {
-            const gap = parseInt(row[5]);
-            if (gap > 80) return '#66ff66';
-            else if (gap > 50) return '#99ff99';
+            const mrr = parseFloat(row[6]);
+            if (mrr > 0.15) return '#66ff66';
+            else if (mrr > 0.10) return '#99ff99';
             return '#ccffcc';
         })
     };
