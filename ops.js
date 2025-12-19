@@ -1252,14 +1252,29 @@ function getGradientColor(factor, min, max, startHex, endHex) {
 function runAllAnalysis() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ss.toast("Starting full analysis suite...");
+
     try {
         runFullAnalysis();
-        runHotTakesAnalysis();
-        runMoreAnalysis();
-        runSpiceAnalysis();
-        ss.toast("All Analysis Completed Successfully!");
+        ss.toast("Opps analysis done")
     } catch (e) {
-        console.error(e);
-        ss.toast("Error during analysis (check logs).");
+        ss.toast("Error at opps analysis (check log)")
+    }
+    try {
+        runHotTakesAnalysis();
+        ss.toast("Hot takes and glazes analysis done")
+    } catch (e) {
+        ss.toast("Error at hot takes and glazes analysis (check log)")
+    }
+    try {
+        runMoreAnalysis();
+        ss.toast("More analysis done")
+    } catch (e) {
+        ss.toast("Error at more analysis (check log)")
+    }
+    try {
+        runSpiceAnalysis();
+        ss.toast("Spice analysis done")
+    } catch (e) {
+        ss.toast("Error at spice analysis (check log)")
     }
 }
