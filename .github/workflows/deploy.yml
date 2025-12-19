@@ -23,23 +23,13 @@ jobs:
 
       - name: Create clasprc.json
         run: |
-          echo "HOME is: $HOME"
-          echo "Writing credentials file..."
-          echo '${{ secrets.CLASPRC_JSON }}' > $HOME/.clasprc.json
-          echo "File location: $HOME/.clasprc.json"
-          ls -la $HOME/.clasprc.json || echo "File does not exist!"
-          FILESIZE=$(wc -c < "$HOME/.clasprc.json")
-          echo "File size: $FILESIZE bytes"
-          if [ "$FILESIZE" -lt 100 ]; then
-            echo "ERROR: File is too small or empty. Check your CLASPRC_JSON secret!"
-            exit 1
-          fi
-          echo "First 50 chars (should start with '{'):"
-          head -c 50 $HOME/.clasprc.json
+          echo "Decoding credentials from Base64..."
+          echo "${{ secrets.CLASPRC_JSON }}" | base64 -d > $HOME/.clasprc.json
+          echo "File created at $HOME/.clasprc.json"
+          ls -la $HOME/.clasprc.json
+          echo "First 20 chars (should start with '{'):"
+          head -c 20 $HOME/.clasprc.json
           echo ""
 
       - name: Deploy to Main Script
-        run: |
-          echo "Checking if clasp can find credentials..."
-          ls -la $HOME/.clasprc.json
-          clasp push --force
+        run: clasp push --force
