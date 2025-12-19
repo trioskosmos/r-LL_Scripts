@@ -862,6 +862,11 @@ function getOutlierUsers(allData, configs, ss) {
 // FEATURE 7: COMEBACK/SLEEPER SONGS
 // ============================================
 function getComebackSongs(allData) {
+    // Adjustable thresholds
+    const MIN_LOVER_RANK = 35;      // Someone ranks it in top 35
+    const MIN_AVG_RANK = 50;        // Overall average is at least 50 (underrated)
+    const MIN_MRR = 0.02;           // Minimum MRR threshold
+    
     const sleepers = [];
     
     Object.keys(allData.songs).forEach(songName => {
@@ -881,8 +886,8 @@ function getComebackSongs(allData) {
         // Calculate MRR for this song
         const mrr = song.ranks.reduce((sum, r) => sum + (1 / (1 + r.rank)), 0) / song.ranks.length;
         
-        // Filter: underrated (high avg) + someone loves it (low minRank) + decent MRR
-        if (maxLover && minRank < 30 && avgRank > 60 && mrr > 0.05) {
+        // Filter: underrated + someone loves it + decent MRR
+        if (maxLover && minRank < MIN_LOVER_RANK && avgRank > MIN_AVG_RANK && mrr > MIN_MRR) {
             sleepers.push({
                 song: songName,
                 avgRank: avgRank,
@@ -898,6 +903,8 @@ function getComebackSongs(allData) {
     sleepers.sort((a, b) => b.mrr - a.mrr || b.gap - a.gap);
     const topSleepers = sleepers.slice(0, 15);
     
+    if (topSleepers.length === 0) return null;
+    
     const rows = topSleepers.map((s, idx) => [
         idx + 1,
         s.song,
@@ -909,7 +916,7 @@ function getComebackSongs(allData) {
     ]);
     
     return {
-        title: 'COMEBACK SONGS',
+        title: 'SLEEPER SONGS (songs loved by at least one person but not many)',
         description: 'Underrated gems loved by at least one user',
         titleColor: '#27ae60',
         headers: [['Rank', 'Song', 'Avg Rank', 'Lover', 'Their Rank', 'Gap', 'MRR']],
