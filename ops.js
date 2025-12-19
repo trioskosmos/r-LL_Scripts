@@ -334,9 +334,9 @@ function runMoreAnalysis() {
         getMostConsistentlyRanked(allData),
         getHotTakesPerUser(allData),
         getSongDisputeAnalysis(configs, ss),
-        getUniversallyTopBottom(allData),
+        getUniversallyTopBottom(allData, ss),
         getComebackSongs(allData),
-        getSubunitPopularity(allData),
+        getSubunitPopularity(allData, ss),
         getOutlierUsers(allData, configs, ss),
     ].filter(f => f !== null);
 
@@ -436,77 +436,63 @@ function displayFeaturePair(sheet, startRow, feature1, feature2, col1, col2) {
 }
 
 /**
- * Helper: Collect all song data across all group tabs
+ * Helper: Collect all song data from "All Songs" tab only
  */
 function collectAllSongData(configs, ss) {
     const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
     const songs = {};
     const userRanks = {};
-
-    // Build a map of song names to artists from Base sheet
-    const baseSheet = ss.getSheetByName('Base');
-    const artistMap = {};
-    if (baseSheet) {
-        const baseData = baseSheet.getDataRange().getValues();
-        for (let i = 1; i < baseData.length; i++) {
-            const songName = String(baseData[i][1]).trim();
-            const artist = String(baseData[i][7]).trim();
-            artistMap[songName] = artist;
+    
+    // Read ONLY from "All Songs" tab
+    const allSongsSheet = ss.getSheetByName('All Songs');
+    if (!allSongsSheet) return { songs, userRanks };
+    
+    const data = allSongsSheet.getDataRange().getValues();
+    if (data.length < 2) return { songs, userRanks };
+    
+    const headers = data[0];
+    const rows = data.slice(1);
+    
+    const userCols = [];
+    headers.forEach((h, idx) => {
+        if (!NON_USER_COLUMNS.includes(h) && h !== "") {
+            const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+            if (hasData) userCols.push({ name: h, index: idx });
         }
-    }
-
-    configs.forEach(config => {
-        const sheet = ss.getSheetByName(config.tabName);
-        if (!sheet) return;
-
-        const data = sheet.getDataRange().getValues();
-        if (data.length < 2) return;
-
-        const headers = data[0];
-        const rows = data.slice(1);
-
-        const userCols = [];
-        headers.forEach((h, idx) => {
-            if (!NON_USER_COLUMNS.includes(h) && h !== "") {
-                const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-                if (hasData) userCols.push({ name: h, index: idx });
+    });
+    
+    rows.forEach(row => {
+        const songName = String(row[1]);
+        
+        if (!songs[songName]) {
+            songs[songName] = { ranks: [] };
+        }
+        
+        userCols.forEach(u => {
+            const rank = parseFloat(row[u.index]);
+            if (!isNaN(rank)) {
+                songs[songName].ranks.push({ user: u.name, rank: rank });
+                
+                if (!userRanks[u.name]) userRanks[u.name] = [];
+                userRanks[u.name].push(rank);
             }
-        });
-
-        rows.forEach(row => {
-            const songName = String(row[1]);
-            const artist = artistMap[songName] || "";
-
-            if (!songs[songName]) {
-                songs[songName] = { ranks: [], artist: artist };
-            }
-
-            userCols.forEach(u => {
-                const rank = parseFloat(row[u.index]);
-                if (!isNaN(rank)) {
-                    songs[songName].ranks.push({ user: u.name, rank: rank });
-
-                    if (!userRanks[u.name]) userRanks[u.name] = [];
-                    userRanks[u.name].push(rank);
-                }
-            });
         });
     });
-
+    
     // Calculate stats for songs
     Object.keys(songs).forEach(songName => {
         const ranks = songs[songName].ranks.map(r => r.rank);
         const avg = ranks.reduce((a, b) => a + b, 0) / ranks.length;
         const variance = ranks.reduce((sum, r) => sum + Math.pow(r - avg, 2), 0) / ranks.length;
         const stdDev = Math.sqrt(variance);
-
+        
         songs[songName].avgRank = avg;
         songs[songName].stdDev = stdDev;
         songs[songName].min = Math.min(...ranks);
         songs[songName].max = Math.max(...ranks);
         songs[songName].count = ranks.length;
     });
-
+    
     return { songs, userRanks };
 }
 
@@ -641,67 +627,66 @@ function getHotTakesPerUser(allData) {
 // FEATURE 4: MOST DISPUTED SONGS
 // ============================================
 function getSongDisputeAnalysis(configs, ss) {
+    const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
     const SHOW_TOP_SONGS = 20;
     let songDisputes = {};
 
-    configs.forEach(config => {
-        const configSheet = ss.getSheetByName(config.tabName);
-        if (!configSheet) return;
+    // Read ONLY from "All Songs" tab
+    const allSongsSheet = ss.getSheetByName('All Songs');
+    if (!allSongsSheet) return null;
 
-        const data = configSheet.getDataRange().getValues();
-        if (data.length < 2) return;
+    const data = allSongsSheet.getDataRange().getValues();
+    if (data.length < 2) return null;
 
-        const headers = data[0];
-        const rows = data.slice(1);
-        const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
+    const headers = data[0];
+    const rows = data.slice(1);
 
-        const userCols = [];
-        headers.forEach((h, idx) => {
-            if (!NON_USER_COLUMNS.includes(h) && h !== "") {
-                const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-                if (hasData) userCols.push({ name: h, index: idx });
-            }
-        });
+    const userCols = [];
+    headers.forEach((h, idx) => {
+        if (!NON_USER_COLUMNS.includes(h) && h !== "") {
+            const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+            if (hasData) userCols.push({ name: h, index: idx });
+        }
+    });
 
-        if (userCols.length < 2) return;
+    if (userCols.length < 2) return null;
 
-        rows.forEach(row => {
-            const songName = String(row[1]);
-            let maxDisagreement = 0;
-            let maxPair = "";
-            let avgDisagreement = 0;
-            let pairCount = 0;
+    rows.forEach(row => {
+        const songName = String(row[1]);
+        let maxDisagreement = 0;
+        let maxPair = "";
+        let avgDisagreement = 0;
+        let pairCount = 0;
 
-            for (let i = 0; i < userCols.length; i++) {
-                for (let j = i + 1; j < userCols.length; j++) {
-                    const rank1 = parseFloat(row[userCols[i].index]);
-                    const rank2 = parseFloat(row[userCols[j].index]);
+        for (let i = 0; i < userCols.length; i++) {
+            for (let j = i + 1; j < userCols.length; j++) {
+                const rank1 = parseFloat(row[userCols[i].index]);
+                const rank2 = parseFloat(row[userCols[j].index]);
 
-                    if (isNaN(rank1) || isNaN(rank2)) continue;
+                if (isNaN(rank1) || isNaN(rank2)) continue;
 
-                    const disagreement = Math.abs(rank1 - rank2);
-                    avgDisagreement += disagreement;
-                    pairCount++;
+                const disagreement = Math.abs(rank1 - rank2);
+                avgDisagreement += disagreement;
+                pairCount++;
 
-                    if (disagreement > maxDisagreement) {
-                        maxDisagreement = disagreement;
-                        maxPair = `${userCols[i].name} vs ${userCols[j].name}`;
-                    }
+                if (disagreement > maxDisagreement) {
+                    maxDisagreement = disagreement;
+                    maxPair = `${userCols[i].name} vs ${userCols[j].name}`;
                 }
             }
+        }
 
-            if (pairCount > 0) {
-                avgDisagreement /= pairCount;
+        if (pairCount > 0) {
+            avgDisagreement /= pairCount;
 
-                if (!songDisputes[songName]) {
-                    songDisputes[songName] = {
-                        maxPair: maxPair,
-                        maxDisagreement: maxDisagreement,
-                        avgDisagreement: avgDisagreement
-                    };
-                }
+            if (!songDisputes[songName]) {
+                songDisputes[songName] = {
+                    maxPair: maxPair,
+                    maxDisagreement: maxDisagreement,
+                    avgDisagreement: avgDisagreement
+                };
             }
-        });
+        }
     });
 
     const topDisputes = Object.keys(songDisputes)
@@ -714,15 +699,15 @@ function getSongDisputeAnalysis(configs, ss) {
 
     if (topDisputes.length === 0) return null;
 
-    const rows = topDisputes.map((item, idx) => [
+    const rows_data = topDisputes.map((item, idx) => [
         idx + 1,
         item.song,
         item.maxPair,
         item.maxDisagreement,
         item.avgDisagreement.toFixed(1)
     ]);
-
-    const rowBgColors = rows.map(row => {
+    
+    const rowBgColors = rows_data.map(row => {
         const maxDiff = row[3];
         if (maxDiff > 100) return '#ff9999';
         else if (maxDiff > 50) return '#ffcc99';
@@ -731,11 +716,12 @@ function getSongDisputeAnalysis(configs, ss) {
     });
 
     return {
-        title: 'MOST DISPUTED SONGS (1v1 fight to the death)',
+        title: 'MOST DISPUTED SONGS',
+        description: 'Biggest pairwise disagreements on individual songs',
         titleColor: '#cc6600',
         headers: [['Rank', 'Song', 'Biggest Fight', 'Max Diff', 'Avg Diff']],
         headerBgColor: '#fff2cc',
-        rows: rows,
+        rows: rows_data,
         rowBgColors: rowBgColors
     };
 }
@@ -798,73 +784,72 @@ function getUniversallyTopBottom(allData) {
 function getOutlierUsers(allData, configs, ss) {
     const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
     const userDistances = {};
-
-    configs.forEach(config => {
-        const sheet = ss.getSheetByName(config.tabName);
-        if (!sheet) return;
-
-        const data = sheet.getDataRange().getValues();
-        if (data.length < 2) return;
-
-        const headers = data[0];
-        const rows = data.slice(1);
-
-        const userCols = [];
-        headers.forEach((h, idx) => {
-            if (!NON_USER_COLUMNS.includes(h) && h !== "") {
-                const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-                if (hasData) userCols.push({ name: h, index: idx });
-            }
-        });
-
-        userCols.forEach(u1 => {
-            if (!userDistances[u1.name]) userDistances[u1.name] = { total: 0, count: 0 };
-
-            userCols.forEach(u2 => {
-                if (u1.name === u2.name) return;
-
-                let distance = 0;
-                let comparisons = 0;
-
-                rows.forEach(row => {
-                    const rank1 = parseFloat(row[u1.index]);
-                    const rank2 = parseFloat(row[u2.index]);
-
-                    if (!isNaN(rank1) && !isNaN(rank2)) {
-                        distance += Math.abs(rank1 - rank2);
-                        comparisons++;
-                    }
-                });
-
-                if (comparisons > 0) {
-                    userDistances[u1.name].total += distance / comparisons;
-                    userDistances[u1.name].count++;
+    
+    // Read ONLY from "All Songs" tab
+    const allSongsSheet = ss.getSheetByName('All Songs');
+    if (!allSongsSheet) return null;
+    
+    const data = allSongsSheet.getDataRange().getValues();
+    if (data.length < 2) return null;
+    
+    const headers = data[0];
+    const rows = data.slice(1);
+    
+    const userCols = [];
+    headers.forEach((h, idx) => {
+        if (!NON_USER_COLUMNS.includes(h) && h !== "") {
+            const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+            if (hasData) userCols.push({ name: h, index: idx });
+        }
+    });
+    
+    userCols.forEach(u1 => {
+        if (!userDistances[u1.name]) userDistances[u1.name] = { total: 0, count: 0 };
+        
+        userCols.forEach(u2 => {
+            if (u1.name === u2.name) return;
+            
+            let distance = 0;
+            let comparisons = 0;
+            
+            rows.forEach(row => {
+                const rank1 = parseFloat(row[u1.index]);
+                const rank2 = parseFloat(row[u2.index]);
+                
+                if (!isNaN(rank1) && !isNaN(rank2)) {
+                    distance += Math.abs(rank1 - rank2);
+                    comparisons++;
                 }
             });
+            
+            if (comparisons > 0) {
+                userDistances[u1.name].total += distance / comparisons;
+                userDistances[u1.name].count++;
+            }
         });
     });
-
+    
     const outliers = Object.keys(userDistances)
         .map(userName => ({
             user: userName,
             avgDistance: userDistances[userName].count > 0 ? userDistances[userName].total / userDistances[userName].count : 0
         }))
         .sort((a, b) => b.avgDistance - a.avgDistance);
-
-    const rows = outliers.map((u, idx) => [
+    
+    const rows_data = outliers.map((u, idx) => [
         idx + 1,
         u.user,
         u.avgDistance.toFixed(1)
     ]);
-
+    
     return {
-        title: 'OUTLIER RANKING (whos the spiciest)',
+        title: 'OUTLIER USERS',
         description: 'Users with most unique/different taste from others',
         titleColor: '#d33527',
         headers: [['Rank', 'User', 'Avg Distance']],
         headerBgColor: '#f4cccc',
-        rows: rows,
-        rowBgColors: rows.map(row => {
+        rows: rows_data,
+        rowBgColors: rows_data.map(row => {
             const dist = parseFloat(row[2]);
             if (dist > 25) return '#ff9999';
             else if (dist > 15) return '#ffcc99';
@@ -935,247 +920,115 @@ function getComebackSongs(allData) {
 // ============================================
 // FEATURE 8: SUBUNIT POPULARITY
 // ============================================
-function getSubunitPopularity(allData) {
+function getSubunitPopularity(allData, ss) {
+    const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
+    
+    // Build artist map from Base sheet
+    const artistMap = {};
+    const baseSheet = ss.getSheetByName('Base');
+    if (baseSheet) {
+        const baseData = baseSheet.getDataRange().getValues();
+        for (let i = 1; i < baseData.length; i++) {
+            const songName = String(baseData[i][1]).trim();
+            const artist = String(baseData[i][7]).trim();
+            artistMap[songName] = artist;
+        }
+    }
+    
     const subunitMap = {
         'ID:160': 'CatChu!',
         'ID:161': 'KALEIDOSCORE',
         'ID:162': '5yncri5e!'
     };
-
+    
     const subunits = {
         'CatChu!': { ranks: [], count: 0 },
         'KALEIDOSCORE': { ranks: [], count: 0 },
         '5yncri5e!': { ranks: [], count: 0 }
     };
-
-    Object.keys(allData.songs).forEach(songName => {
-        const song = allData.songs[songName];
-        const artist = song.artist || "";
-
+    
+    // Read from "All Songs" tab
+    const allSongsSheet = ss.getSheetByName('All Songs');
+    if (!allSongsSheet) return null;
+    
+    const data = allSongsSheet.getDataRange().getValues();
+    if (data.length < 2) return null;
+    
+    const headers = data[0];
+    const rows = data.slice(1);
+    
+    const userCols = [];
+    headers.forEach((h, idx) => {
+        if (!NON_USER_COLUMNS.includes(h) && h !== "") {
+            const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+            if (hasData) userCols.push({ name: h, index: idx });
+        }
+    });
+    
+    // Process rows and map to subunits
+    rows.forEach(row => {
+        const songName = String(row[1]);
+        const artist = artistMap[songName] || "";
+        
         // Check which subunit this song belongs to
         Object.keys(subunitMap).forEach(idKey => {
             if (artist.includes(idKey)) {
                 const subunitName = subunitMap[idKey];
-                subunits[subunitName].ranks = subunits[subunitName].ranks.concat(
-                    song.ranks.map(r => r.rank)
-                );
+                
+                // Collect all user ranks for this song
+                userCols.forEach(u => {
+                    const rank = parseFloat(row[u.index]);
+                    if (!isNaN(rank)) {
+                        subunits[subunitName].ranks.push(rank);
+                    }
+                });
+                
                 subunits[subunitName].count++;
             }
         });
     });
-
+    
     const results = Object.keys(subunits)
         .map(subunit => {
             const data = subunits[subunit];
             const ranks = data.ranks;
-
+            
             if (ranks.length === 0) return null;
-
+            
             const avgRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
             const variance = ranks.reduce((sum, r) => sum + Math.pow(r - avgRank, 2), 0) / ranks.length;
             const stdDev = Math.sqrt(variance);
-
+            
             return {
                 subunit: subunit,
                 avgRank: avgRank,
-                stdDev: stdDev
+                stdDev: stdDev,
             };
         })
         .filter(r => r !== null)
         .sort((a, b) => a.avgRank - b.avgRank);
-
-    const rows = results.map((r, idx) => [
+    
+    const rows_data = results.map((r, idx) => [
         idx + 1,
         r.subunit,
         r.avgRank.toFixed(1),
-        r.stdDev.toFixed(2)
+        r.stdDev.toFixed(2),
     ]);
-
+    
     return {
-        title: 'SUBUNIT POPULARITY (uh oh)',
+        title: 'SUBUNIT POPULARITY',
         description: 'Ranking performance of KALEIDOSCORE, 5yncri5e!, and CatChu!',
         titleColor: '#e67e22',
-        headers: [['Rank', 'Subunit', 'Avg Rank', 'Deviation']],
+        headers: [['Rank', 'Subunit', 'Avg Rank', 'Controversy']],
         headerBgColor: '#fdebd0',
-        rows: rows,
-        rowBgColors: rows.map((row, idx) => {
+        rows: rows_data,
+        rowBgColors: rows_data.map((row, idx) => {
             if (idx === 0) return '#66ff66';
-            else if (idx === rows.length - 1) return '#ff9999';
+            else if (idx === rows_data.length - 1) return '#ff9999';
             return '#ffff99';
         })
     };
 }
-
-
-
-// ============================================
-// MAIN: SPICE ANALYSIS (DEDICATED TAB)
-// ============================================
-function runSpiceAnalysis() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const SHEET_NAME = 'Spice Index';
-    const configs = getTargetSheetConfigs();
-    const allData = collectAllSongData(configs, ss);
-
-    if (Object.keys(allData.songs).length === 0) return;
-
-    let sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
-    sheet.clear();
-
-    const spiceData = getSpiceMeterAnalysis(allData, configs, ss);
-
-    // Header styling
-    sheet.getRange(1, 1).setValue(spiceData.title).setFontWeight('bold').setFontSize(16).setFontColor(spiceData.titleColor);
-    sheet.getRange(2, 1).setValue(spiceData.description).setFontStyle('italic');
-
-    const headers = spiceData.headers[0];
-    sheet.getRange(4, 1, 1, headers.length).setValues([headers]).setBackground(spiceData.headerBgColor).setFontWeight('bold');
-
-    if (spiceData.rows.length > 0) {
-        sheet.getRange(5, 1, spiceData.rows.length, spiceData.rows[0].length).setValues(spiceData.rows);
-
-        // Apply row background colors
-        spiceData.rowBgColors.forEach((color, idx) => {
-            sheet.getRange(5 + idx, 1, 1, headers.length).setBackground(color);
-        });
-
-        // Formatting
-        sheet.setColumnWidth(1, 150); // User
-        sheet.setColumnWidth(2, 120); // Global
-        for (let i = 2; i < headers.length; i++) {
-            sheet.setColumnWidth(i + 1, 120);
-        }
-
-        // Bold the Global column
-        sheet.getRange(4, 2, spiceData.rows.length + 1, 1).setFontWeight('bold');
-
-        // Final borders
-        sheet.getRange(4, 1, spiceData.rows.length + 1, headers.length).setBorder(true, true, true, true, true, true);
-    }
-
-    ss.toast("Spice Index updated!");
-}
-
-// ============================================
-// FEATURE 9: THE SPICE METER
-// ============================================
-function getSpiceMeterAnalysis(allData, configs, ss) {
-    const userRMSPerGroup = {}; // { user: { groupName: sqDiffs[] } }
-    const groupNames = configs.map(c => c.tabName);
-    const allUniqueUsers = Object.keys(allData.userRanks);
-
-    allUniqueUsers.forEach(user => {
-        userRMSPerGroup[user] = {};
-        groupNames.forEach(gn => userRMSPerGroup[user][gn] = []);
-    });
-
-    const SYS_COLS = ['Rank', 'Song', 'Points', 'Average'];
-
-    configs.forEach(config => {
-        const groupName = config.tabName;
-        const sheet = ss.getSheetByName(groupName);
-        if (!sheet) return;
-
-        const data = sheet.getDataRange().getValues();
-        if (data.length < 2) return;
-
-        const headers = data[0];
-        const rows = data.slice(1);
-
-        const userColsInGroup = [];
-        headers.forEach((h, idx) => {
-            const cleanH = String(h || "").trim();
-            if (cleanH !== "" && !SYS_COLS.some(s => s.toLowerCase() === cleanH.toLowerCase())) {
-                const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-                if (hasData) userColsInGroup.push({ name: cleanH, index: idx });
-            }
-        });
-
-        rows.forEach(row => {
-            const userRanksForSong = userColsInGroup.map(u => ({
-                user: u.name,
-                rank: parseFloat(row[u.index])
-            })).filter(r => !isNaN(r.rank));
-
-            if (userRanksForSong.length > 1) {
-                userRanksForSong.forEach(userRankObj => {
-                    const otherRanks = userRanksForSong.filter(r => r.user !== userRankObj.user).map(r => r.rank);
-                    const avgOther = otherRanks.reduce((a, b) => a + b, 0) / otherRanks.length;
-                    const sqDiff = Math.pow(userRankObj.rank - avgOther, 2);
-
-                    if (userRMSPerGroup[userRankObj.user] && userRMSPerGroup[userRankObj.user][groupName]) {
-                        userRMSPerGroup[userRankObj.user][groupName].push(sqDiff);
-                    }
-                });
-            }
-        });
-    });
-
-    const rows = allUniqueUsers.map(user => {
-        const validGroupScores = [];
-
-        const groupCols = groupNames.map(gn => {
-            const diffs = userRMSPerGroup[user][gn];
-            if (diffs && diffs.length > 0) {
-                const rms = Math.sqrt(diffs.reduce((a, b) => a + b, 0) / diffs.length);
-                validGroupScores.push(rms);
-                return rms.toFixed(1);
-            } else {
-                return "-";
-            }
-        });
-
-        // Global Spice = Average of Group Spice Scores
-        let globalSpice = 0;
-        if (validGroupScores.length > 0) {
-            globalSpice = validGroupScores.reduce((a, b) => a + b, 0) / validGroupScores.length;
-        }
-
-        // Final row format: [User, Global, Group1, Group2...]
-        return [user, globalSpice.toFixed(1), ...groupCols];
-    });
-
-    // Sort by global score (Highest Spice at top)
-    rows.sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
-
-    const resultHeaders = [['User', 'Global Spice (Avg)', ...groupNames]];
-
-    const maxSpice = rows.length > 0 ? parseFloat(rows[0][1]) : 1;
-    const minSpice = rows.length > 0 ? parseFloat(rows[rows.length - 1][1]) : 0;
-
-    return {
-        title: 'THE SPICE METER (Group Breakdown)',
-        description: 'Global Spice is the average of your scores across all groups. Higher = More Unique taste.',
-        titleColor: '#e67e22',
-        headers: resultHeaders,
-        headerBgColor: '#fdebd0',
-        rows: rows,
-        rowBgColors: rows.map(row => {
-            const val = parseFloat(row[1]);
-            // Gradient: Max(Spicy/Red) -> Min(Basic/Blue)
-            // Midpoint is average or median, but let's just lerp between Max and Min for simplicity
-            // or use specific thresholds if preferred. Let's use relative positioning.
-
-            // Map value to 0-1 range (1 = max spice, 0 = min spice)
-            const ratio = (val - minSpice) / (maxSpice - minSpice || 1);
-
-            // If ratio > 0.5 interpolate White -> Red
-            // If ratio < 0.5 interpolate Blue -> White
-
-            if (ratio > 0.5) {
-                // 0.5 -> 1.0 (0% -> 100% Red intensity)
-                const intensity = (ratio - 0.5) * 2;
-                return getGradientColor(intensity, 0, 1, '#ffffff', '#ff9999');
-            } else {
-                // 0.0 -> 0.5 (100% -> 0% Blue intensity)
-                const intensity = (0.5 - ratio) * 2;
-                return getGradientColor(intensity, 0, 1, '#ffffff', '#cceeff');
-            }
-        })
-    };
-}
-
 
 /**
  * Helper to write a small batch of takes horizontally.
