@@ -106,6 +106,8 @@ function onOpen() {
     .addToUi();
 
   ui.createMenu('🛠️ Analysis')
+    .addItem('❤️‍🔥 Run ALL Analysis', 'runAllAnalysis')
+    .addSeparator()
     .addItem('🚀 Run Opps Analysis (Friends/Rivals)', 'runFullAnalysis')
     .addItem('🌶️ Run Hot Takes & Glazes', 'runHotTakesAnalysis')
     .addItem('📈 Run More Analysis', 'runMoreAnalysis')
@@ -556,11 +558,7 @@ function syncFromInbox() {
 
   // 4. Run Analysis automatically
   try {
-    runFullAnalysis();
-    runHotTakesAnalysis();
-    runMoreAnalysis();
-    runSpiceAnalysis();
-    ss.toast("Sync & All Analyses Complete!");
+    runAllAnalysis();
   } catch (e) {
     ss.toast("Sync finished, but analysis encountered an error.");
   }
