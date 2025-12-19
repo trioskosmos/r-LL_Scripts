@@ -916,7 +916,7 @@ function getComebackSongs(allData) {
     ]);
     
     return {
-        title: 'COMEBACK SONGS',
+        title: 'SLEEPER SONGS (songs loved by at least one person but not many)',
         description: 'Underrated gems loved by at least one user',
         titleColor: '#27ae60',
         headers: [['Rank', 'Song', 'Avg Rank', 'Lover', 'Their Rank', 'Gap', 'MRR']],
