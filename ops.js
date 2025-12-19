@@ -1029,518 +1029,154 @@ function getSubunitPopularity(allData, ss) {
         })
     };
 }
-
-
-
-
-
-
-
-
 // ============================================
-
-
 // MAIN: SPICE ANALYSIS (DEDICATED TAB)
-
-
 // ============================================
-
-
 function runSpiceAnalysis() {
-
-
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-
     const SHEET_NAME = 'Spice Index';
-
-
     const configs = getTargetSheetConfigs();
-
-
     const allData = collectAllSongData(configs, ss);
-
-
-
-
 
     if (Object.keys(allData.songs).length === 0) return;
 
-
-
-
-
     let sheet = ss.getSheetByName(SHEET_NAME);
-
-
     if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
-
-
     sheet.clear();
-
-
-
-
 
     const spiceData = getSpiceMeterAnalysis(allData, configs, ss);
 
-
-
-
-
     // Header styling
-
-
     sheet.getRange(1, 1).setValue(spiceData.title).setFontWeight('bold').setFontSize(16).setFontColor(spiceData.titleColor);
-
-
     sheet.getRange(2, 1).setValue(spiceData.description).setFontStyle('italic');
 
-
-
-
-
     const headers = spiceData.headers[0];
-
-
     sheet.getRange(4, 1, 1, headers.length).setValues([headers]).setBackground(spiceData.headerBgColor).setFontWeight('bold');
 
-
-
-
-
     if (spiceData.rows.length > 0) {
-
-
         sheet.getRange(5, 1, spiceData.rows.length, spiceData.rows[0].length).setValues(spiceData.rows);
 
-
-
-
-
         // Apply row background colors
-
-
         spiceData.rowBgColors.forEach((color, idx) => {
-
-
             sheet.getRange(5 + idx, 1, 1, headers.length).setBackground(color);
-
-
         });
 
-
-
-
-
         // Formatting
-
-
         sheet.setColumnWidth(1, 150); // User
-
-
         sheet.setColumnWidth(2, 120); // Global
-
-
         for (let i = 2; i < headers.length; i++) {
-
-
             sheet.setColumnWidth(i + 1, 120);
-
-
         }
 
-
-
-
-
         // Bold the Global column
-
-
         sheet.getRange(4, 2, spiceData.rows.length + 1, 1).setFontWeight('bold');
 
-
-
-
-
         // Final borders
-
-
         sheet.getRange(4, 1, spiceData.rows.length + 1, headers.length).setBorder(true, true, true, true, true, true);
-
-
     }
 
-
-
-
-
     ss.toast("Spice Index updated!");
-
-
 }
 
-
-
-
-
 // ============================================
-
-
 // FEATURE 9: THE SPICE METER
-
-
 // ============================================
-
-
 function getSpiceMeterAnalysis(allData, configs, ss) {
-
-
     const userRMSPerGroup = {}; // { user: { groupName: sqDiffs[] } }
-
-
     const groupNames = configs.map(c => c.tabName);
-
-
     const allUniqueUsers = Object.keys(allData.userRanks);
 
-
-
-
-
     allUniqueUsers.forEach(user => {
-
-
         userRMSPerGroup[user] = {};
-
-
         groupNames.forEach(gn => userRMSPerGroup[user][gn] = []);
-
-
     });
-
-
-
-
 
     const SYS_COLS = ['Rank', 'Song', 'Points', 'Average'];
 
-
-
-
-
     configs.forEach(config => {
-
-
         const groupName = config.tabName;
-
-
         const sheet = ss.getSheetByName(groupName);
-
-
         if (!sheet) return;
 
-
-
-
-
         const data = sheet.getDataRange().getValues();
-
-
         if (data.length < 2) return;
 
-
-
-
-
         const headers = data[0];
-
-
         const rows = data.slice(1);
 
-
-
-
-
         const userColsInGroup = [];
-
-
         headers.forEach((h, idx) => {
-
-
             const cleanH = String(h || "").trim();
-
-
             if (cleanH !== "" && !SYS_COLS.some(s => s.toLowerCase() === cleanH.toLowerCase())) {
-
-
                 const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-
-
                 if (hasData) userColsInGroup.push({ name: cleanH, index: idx });
-
-
             }
-
-
         });
-
-
-
-
 
         rows.forEach(row => {
-
-
             const userRanksForSong = userColsInGroup.map(u => ({
-
-
                 user: u.name,
-
-
                 rank: parseFloat(row[u.index])
-
-
             })).filter(r => !isNaN(r.rank));
 
-
-
-
-
             if (userRanksForSong.length > 1) {
-
-
                 userRanksForSong.forEach(userRankObj => {
-
-
                     const otherRanks = userRanksForSong.filter(r => r.user !== userRankObj.user).map(r => r.rank);
-
-
                     const avgOther = otherRanks.reduce((a, b) => a + b, 0) / otherRanks.length;
-
-
                     const sqDiff = Math.pow(userRankObj.rank - avgOther, 2);
 
-
-
-
-
                     if (userRMSPerGroup[userRankObj.user] && userRMSPerGroup[userRankObj.user][groupName]) {
-
-
                         userRMSPerGroup[userRankObj.user][groupName].push(sqDiff);
-
-
                     }
-
-
                 });
-
-
             }
-
-
         });
-
-
     });
-
-
-
-
 
     const rows = allUniqueUsers.map(user => {
-
-
         const validGroupScores = [];
 
-
-
-
-
         const groupCols = groupNames.map(gn => {
-
-
             const diffs = userRMSPerGroup[user][gn];
-
-
             if (diffs && diffs.length > 0) {
-
-
                 const rms = Math.sqrt(diffs.reduce((a, b) => a + b, 0) / diffs.length);
-
-
                 validGroupScores.push(rms);
-
-
                 return rms.toFixed(1);
-
-
             } else {
-
-
                 return "-";
-
-
             }
-
-
         });
 
-
-
-
-
         // Global Spice = Average of Group Spice Scores
-
-
         let globalSpice = 0;
-
-
         if (validGroupScores.length > 0) {
-
-
             globalSpice = validGroupScores.reduce((a, b) => a + b, 0) / validGroupScores.length;
-
-
         }
 
-
-
-
-
         // Final row format: [User, Global, Group1, Group2...]
-
-
         return [user, globalSpice.toFixed(1), ...groupCols];
-
-
     });
 
-
-
-
-
     // Sort by global score (Highest Spice at top)
-
-
     rows.sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
-
-
-
-
 
     const resultHeaders = [['User', 'Global Spice (Avg)', ...groupNames]];
 
-
-
-
-
-    const maxSpice = rows.length > 0 ? parseFloat(rows[0][1]) : 1;
-
-
-    const minSpice = rows.length > 0 ? parseFloat(rows[rows.length - 1][1]) : 0;
-
-
-
-
-
     return {
-
-
         title: 'THE SPICE METER (Group Breakdown)',
-
-
         description: 'Global Spice is the average of your scores across all groups. Higher = More Unique taste.',
-
-
         titleColor: '#e67e22',
-
-
         headers: resultHeaders,
-
-
         headerBgColor: '#fdebd0',
-
-
         rows: rows,
-
-
         rowBgColors: rows.map(row => {
-
-
-            const val = parseFloat(row[1]);
-
-
-            // Gradient: Max(Spicy/Red) -> Min(Basic/Blue)
-
-
-            // Midpoint is average or median, but let's just lerp between Max and Min for simplicity
-
-
-            // or use specific thresholds if preferred. Let's use relative positioning.
-
-
-
-
-
-            // Map value to 0-1 range (1 = max spice, 0 = min spice)
-
-
-            const ratio = (val - minSpice) / (maxSpice - minSpice || 1);
-
-
-
-
-
-            // If ratio > 0.5 interpolate White -> Red
-
-
-            // If ratio < 0.5 interpolate Blue -> White
-
-
-
-
-
-            if (ratio > 0.5) {
-
-
-                // 0.5 -> 1.0 (0% -> 100% Red intensity)
-
-
-                const intensity = (ratio - 0.5) * 2;
-
-
-                return getGradientColor(intensity, 0, 1, '#ffffff', '#ff9999');
-
-
-            } else {
-
-
-                // 0.0 -> 0.5 (100% -> 0% Blue intensity)
-
-
-                const intensity = (0.5 - ratio) * 2;
-
-
-                return getGradientColor(intensity, 0, 1, '#ffffff', '#cceeff');
-
-
-            }
-
-
+            const overall = parseFloat(row[1]);
+            if (overall > 32) return '#ffcccc'; // Spicy
+            if (overall < 18) return '#cceeff'; // Basic
+            return '#ffffff';
         })
-
-
     };
-
-
 }
-
-
-
-
-
 
 /**
  * Helper to write a small batch of takes horizontally.
