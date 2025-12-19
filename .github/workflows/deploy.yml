@@ -22,15 +22,14 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Create clasprc.json
-        env:
-          CLASPRC: ${{ secrets.CLASPRC_JSON }}
         run: |
-          if [ -z "$CLASPRC" ]; then
-            echo "Error: CLASPRC_JSON secret is empty or missing!"
+          echo "${{ secrets.CLASPRC_JSON }}" > ~/.clasprc.json
+          FILESIZE=$(stat -c%s "$HOME/.clasprc.json")
+          echo "Verified: .clasprc.json created ($FILESIZE bytes)."
+          if [ "$FILESIZE" -lt 10 ]; then
+            echo "Error: .clasprc.json is too small. Check your GitHub Secret!"
             exit 1
           fi
-          printf "%s" "$CLASPRC" > ~/.clasprc.json
-          echo "Verified: .clasprc.json created."
 
       - name: Deploy to Main Script
         run: clasp push --force
