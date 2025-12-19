@@ -94,7 +94,7 @@ function onOpen() {
   setupPasteSheetUI();
 
   // 1. UPDATE RANKINGS MENU
-  ui.createMenu('📊 Update System (v3)')
+  ui.createMenu('📊 Update System (v4)')
     .addItem('🚀 1. Sync & Update ALL Sheets', 'syncFromInbox')
     .addSeparator()
     .addItem('🔄 2. Update Membership Only', 'updateFilteredTabs')
