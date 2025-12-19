@@ -1002,7 +1002,7 @@ function runSpiceAnalysis() {
     if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
     sheet.clear();
 
-    const spiceData = getSpiceMeterAnalysis(allData);
+    const spiceData = getSpiceMeterAnalysis(allData, configs, ss);
 
     // Header styling
     sheet.getRange(1, 1).setValue(spiceData.title).setFontWeight('bold').setFontSize(16).setFontColor(spiceData.titleColor);
@@ -1020,13 +1020,17 @@ function runSpiceAnalysis() {
         });
 
         // Formatting
-        sheet.setColumnWidth(1, 50);  // Rank
-        sheet.setColumnWidth(2, 150); // User
-        sheet.setColumnWidth(3, 150); // RMS
-        sheet.setColumnWidth(4, 120); // Index
-        sheet.setColumnWidth(5, 150); // Vibe
+        sheet.setColumnWidth(1, 150); // User
+        sheet.setColumnWidth(2, 120); // Global
+        for (let i = 2; i < headers.length; i++) {
+            sheet.setColumnWidth(i + 1, 120);
+        }
 
-        sheet.getRange(5, 1, spiceData.rows.length, headers.length).setBorder(true, true, true, true, true, true);
+        // Bold the Global column
+        sheet.getRange(4, 2, spiceData.rows.length + 1, 1).setFontWeight('bold');
+
+        // Final borders
+        sheet.getRange(4, 1, spiceData.rows.length + 1, headers.length).setBorder(true, true, true, true, true, true);
     }
 
     ss.toast("Spice Index updated!");
@@ -1035,68 +1039,97 @@ function runSpiceAnalysis() {
 // ============================================
 // FEATURE 9: THE SPICE METER
 // ============================================
-function getSpiceMeterAnalysis(allData) {
-    const userRMS = {};
+function getSpiceMeterAnalysis(allData, configs, ss) {
+    const userRMSPerGroup = {}; // { user: { groupName: sqDiffs[], overallSqDiffs: [] } }
+    const groupNames = configs.map(c => c.tabName);
     const allUniqueUsers = Object.keys(allData.userRanks);
 
     allUniqueUsers.forEach(user => {
-        let squaredDiffs = [];
+        userRMSPerGroup[user] = { overallSqDiffs: [] };
+        groupNames.forEach(gn => userRMSPerGroup[user][gn] = []);
+    });
 
-        // Iterate through all songs to find ones this user ranked
-        Object.keys(allData.songs).forEach(songName => {
-            const song = allData.songs[songName];
-            const userRankObj = song.ranks.find(r => r.user === user);
+    const SYS_COLS = ['Rank', 'Song', 'Points', 'Average'];
 
-            if (userRankObj) {
-                // "Your ranking in relation to other people's average ranking"
-                const otherRanks = song.ranks.filter(r => r.user !== user).map(r => r.rank);
+    configs.forEach(config => {
+        const groupName = config.tabName;
+        const sheet = ss.getSheetByName(groupName);
+        if (!sheet) return;
 
-                if (otherRanks.length > 0) {
-                    const avgOther = otherRanks.reduce((a, b) => a + b, 0) / otherRanks.length;
-                    squaredDiffs.push(Math.pow(userRankObj.rank - avgOther, 2));
-                }
+        const data = sheet.getDataRange().getValues();
+        if (data.length < 2) return;
+
+        const headers = data[0];
+        const rows = data.slice(1);
+
+        const userColsInGroup = [];
+        headers.forEach((h, idx) => {
+            const cleanH = String(h || "").trim();
+            if (cleanH !== "" && !SYS_COLS.some(s => s.toLowerCase() === cleanH.toLowerCase())) {
+                const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+                if (hasData) userColsInGroup.push({ name: cleanH, index: idx });
             }
         });
 
-        if (squaredDiffs.length > 0) {
-            // Root Mean Squared
-            userRMS[user] = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / squaredDiffs.length);
+        rows.forEach(row => {
+            const userRanksForSong = userColsInGroup.map(u => ({
+                user: u.name,
+                rank: parseFloat(row[u.index])
+            })).filter(r => !isNaN(r.rank));
+
+            if (userRanksForSong.length > 1) {
+                userRanksForSong.forEach(userRankObj => {
+                    const otherRanks = userRanksForSong.filter(r => r.user !== userRankObj.user).map(r => r.rank);
+                    const avgOther = otherRanks.reduce((a, b) => a + b, 0) / otherRanks.length;
+                    const sqDiff = Math.pow(userRankObj.rank - avgOther, 2);
+
+                    if (userRMSPerGroup[userRankObj.user]) {
+                        userRMSPerGroup[userRankObj.user][groupName].push(sqDiff);
+                        userRMSPerGroup[userRankObj.user].overallSqDiffs.push(sqDiff);
+                    }
+                });
+            }
+        });
+    });
+
+    const rows = allUniqueUsers.map(user => {
+        const rowData = [user];
+        let overallRMS = 0;
+
+        if (userRMSPerGroup[user].overallSqDiffs.length > 0) {
+            overallRMS = Math.sqrt(userRMSPerGroup[user].overallSqDiffs.reduce((a, b) => a + b, 0) / userRMSPerGroup[user].overallSqDiffs.length);
         }
+        rowData.push(overallRMS.toFixed(1));
+
+        groupNames.forEach(gn => {
+            const diffs = userRMSPerGroup[user][gn];
+            if (diffs && diffs.length > 0) {
+                const rms = Math.sqrt(diffs.reduce((a, b) => a + b, 0) / diffs.length);
+                rowData.push(rms.toFixed(1));
+            } else {
+                rowData.push("-");
+            }
+        });
+
+        return rowData;
     });
 
-    const results = Object.keys(userRMS).map(user => ({
-        user: user,
-        rms: userRMS[user]
-    })).sort((a, b) => a.rms - b.rms);
+    // Sort by overall RMS (Spiciest at top)
+    rows.sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
 
-    const rows = results.map((r, idx) => {
-        // Percentile: (index / (total - 1)) * 100
-        const percentile = results.length > 1 ? (idx / (results.length - 1)) * 100 : 50;
-
-        let vibe = "Normal Person";
-        if (percentile < 25) vibe = "Basic";
-        else if (percentile > 75) vibe = "Spicy";
-
-        return [
-            idx + 1,
-            r.user,
-            r.rms.toFixed(1),
-            percentile.toFixed(0) + "%",
-            vibe
-        ];
-    });
+    const resultHeaders = [['User', 'Global Spice', ...groupNames]];
 
     return {
-        title: 'THE SPICE METER (Root Mean Squared Deviations)',
-        description: 'Percentile of uniqueness in taste. 0% = Basic, 100% = Spicy.',
+        title: 'THE SPICE METER (Group Breakdown)',
+        description: 'Root Mean Squared deviation from others. Higher = More Unique.',
         titleColor: '#e67e22',
-        headers: [['Rank', 'User', 'Spice Score (RMS)', 'Spicy Index', 'Vibe']],
+        headers: resultHeaders,
         headerBgColor: '#fdebd0',
         rows: rows,
         rowBgColors: rows.map(row => {
-            const p = parseInt(row[3]);
-            if (p > 75) return '#ff9999'; // Spicy
-            if (p < 25) return '#cceeff'; // Basic
+            const overall = parseFloat(row[1]);
+            if (overall > 35) return '#ffcccc'; // Spicy
+            if (overall < 15) return '#cceeff'; // Basic
             return '#ffffff';
         })
     };
