@@ -1127,10 +1127,11 @@ function getSpiceMeterAnalysis(allData, configs, ss) {
         headers: resultHeaders,
         headerBgColor: '#fdebd0',
         rows: rows,
-        rowBgColors: rows.map(row => {
-            const overall = parseFloat(row[1]);
-            if (overall > 32) return '#ffcccc'; // Spicy
-            if (overall < 18) return '#cceeff'; // Basic
+        rowBgColors: rows.map((row, idx) => {
+            const total = rows.length;
+            // idx 0 is highest spice (rank 1)
+            if (idx < total * 0.25) return '#ffcccc'; // Top 25% Spicy
+            if (idx >= total * 0.75) return '#cceeff'; // Bottom 25% Basic
             return '#ffffff';
         })
     };
@@ -1164,4 +1165,22 @@ function writeTakesHorizontalBatch(sheet, startRow, startCol, takes) {
 function updateCount(obj, user, type) {
     if (!obj[user]) obj[user] = { most: 0, least: 0 };
     obj[user][type]++;
+}
+
+/**
+ * MAIN: Runs ALL analysis functions in sequence.
+ */
+function runAllAnalysis() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.toast("Starting full analysis suite...");
+    try {
+        runFullAnalysis();
+        runHotTakesAnalysis();
+        runMoreAnalysis();
+        runSpiceAnalysis();
+        ss.toast("All Analysis Completed Successfully!");
+    } catch (e) {
+        console.error(e);
+        ss.toast("Error during analysis (check logs).");
+    }
 }

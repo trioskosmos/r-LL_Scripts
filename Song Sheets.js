@@ -106,6 +106,8 @@ function onOpen() {
     .addToUi();
 
   ui.createMenu('🛠️ Analysis')
+    .addItem('❤️‍🔥 Run ALL Analysis', 'runAllAnalysis')
+    .addSeparator()
     .addItem('🚀 Run Opps Analysis (Friends/Rivals)', 'runFullAnalysis')
     .addItem('🌶️ Run Hot Takes & Glazes', 'runHotTakesAnalysis')
     .addItem('📈 Run More Analysis', 'runMoreAnalysis')
