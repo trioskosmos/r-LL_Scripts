@@ -109,6 +109,7 @@ function onOpen() {
     .addItem('🚀 Run Opps Analysis (Friends/Rivals)', 'runFullAnalysis')
     .addItem('🌶️ Run Hot Takes & Glazes', 'runHotTakesAnalysis')
     .addItem('📈 Run More Analysis', 'runMoreAnalysis')
+    .addItem('🧪 Run Spice Index', 'runSpiceAnalysis')
     .addToUi();
 }
 
@@ -557,9 +558,9 @@ function syncFromInbox() {
   try {
     runFullAnalysis();
     runHotTakesAnalysis();
-    // rumi - add specific top song disputes
     runMoreAnalysis();
-    ss.toast("Sync & Analysis Complete!");
+    runSpiceAnalysis();
+    ss.toast("Sync & All Analyses Complete!");
   } catch (e) {
     ss.toast("Sync finished, but analysis encountered an error.");
   }

@@ -317,7 +317,6 @@ function runMoreAnalysis() {
         getComebackSongs(allData),
         getSubunitPopularity(allData),
         getOutlierUsers(allData, configs, ss),
-        getSpiceMeterAnalysis(allData),
     ].filter(f => f !== null);
 
     // Display features 2 per row
@@ -987,6 +986,51 @@ function getSubunitPopularity(allData) {
 }
 
 
+
+// ============================================
+// MAIN: SPICE ANALYSIS (DEDICATED TAB)
+// ============================================
+function runSpiceAnalysis() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const SHEET_NAME = 'Spice Index';
+    const configs = getTargetSheetConfigs();
+    const allData = collectAllSongData(configs, ss);
+
+    if (Object.keys(allData.songs).length === 0) return;
+
+    let sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
+    sheet.clear();
+
+    const spiceData = getSpiceMeterAnalysis(allData);
+
+    // Header styling
+    sheet.getRange(1, 1).setValue(spiceData.title).setFontWeight('bold').setFontSize(16).setFontColor(spiceData.titleColor);
+    sheet.getRange(2, 1).setValue(spiceData.description).setFontStyle('italic');
+
+    const headers = spiceData.headers[0];
+    sheet.getRange(4, 1, 1, headers.length).setValues([headers]).setBackground(spiceData.headerBgColor).setFontWeight('bold');
+
+    if (spiceData.rows.length > 0) {
+        sheet.getRange(5, 1, spiceData.rows.length, spiceData.rows[0].length).setValues(spiceData.rows);
+
+        // Apply row background colors
+        spiceData.rowBgColors.forEach((color, idx) => {
+            sheet.getRange(5 + idx, 1, 1, headers.length).setBackground(color);
+        });
+
+        // Formatting
+        sheet.setColumnWidth(1, 50);  // Rank
+        sheet.setColumnWidth(2, 150); // User
+        sheet.setColumnWidth(3, 150); // RMS
+        sheet.setColumnWidth(4, 120); // Index
+        sheet.setColumnWidth(5, 150); // Vibe
+
+        sheet.getRange(5, 1, spiceData.rows.length, headers.length).setBorder(true, true, true, true, true, true);
+    }
+
+    ss.toast("Spice Index updated!");
+}
 
 // ============================================
 // FEATURE 9: THE SPICE METER
