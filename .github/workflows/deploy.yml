@@ -23,13 +23,23 @@ jobs:
 
       - name: Create clasprc.json
         run: |
-          echo "${{ secrets.CLASPRC_JSON }}" > ~/.clasprc.json
-          FILESIZE=$(stat -c%s "$HOME/.clasprc.json")
-          echo "Verified: .clasprc.json created ($FILESIZE bytes)."
-          if [ "$FILESIZE" -lt 10 ]; then
-            echo "Error: .clasprc.json is too small. Check your GitHub Secret!"
+          echo "HOME is: $HOME"
+          echo "Writing credentials file..."
+          echo '${{ secrets.CLASPRC_JSON }}' > $HOME/.clasprc.json
+          echo "File location: $HOME/.clasprc.json"
+          ls -la $HOME/.clasprc.json || echo "File does not exist!"
+          FILESIZE=$(wc -c < "$HOME/.clasprc.json")
+          echo "File size: $FILESIZE bytes"
+          if [ "$FILESIZE" -lt 100 ]; then
+            echo "ERROR: File is too small or empty. Check your CLASPRC_JSON secret!"
             exit 1
           fi
+          echo "First 50 chars (should start with '{'):"
+          head -c 50 $HOME/.clasprc.json
+          echo ""
 
       - name: Deploy to Main Script
-        run: clasp push --force
+        run: |
+          echo "Checking if clasp can find credentials..."
+          ls -la $HOME/.clasprc.json
+          clasp push --force
