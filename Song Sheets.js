@@ -635,8 +635,7 @@ function syncFromInbox() {
         if (item.originalRank > lastOrigRank) {
           currentRelRank++;
         }
-        // Keep decimals for accuracy (2.0, 5.5, etc.)
-        relativeMap[item.sheetName] = item.originalRank;
+        relativeMap[item.sheetName] = currentRelRank;  // local group rank
         lastOrigRank = item.originalRank;
       });
 
