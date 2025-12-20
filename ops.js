@@ -1399,7 +1399,7 @@ function runAllAnalysis() {
     } catch (e) {
     const errorMsg = `❌ Hot Takes Error: ${e.message}\nStack: ${e.stack}`;
     Logger.log(errorMsg);
-    SpreadsheetApp.getUi().alert(errorMsg);
+    //SpreadsheetApp.getUi().alert(errorMsg);
     ss.toast("Error at hot takes and glazes analysis - check dialog and logs");
     }
     try {
