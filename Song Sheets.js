@@ -144,7 +144,85 @@ function showTextImportDialog() {
 }
 
 /**
+ * Detects which songs are tied (share same rank number)
+ * Returns: { rank: [song1, song2, ...], ... }
+ */
+function groupSongsByRank(externalMap) {
+  const grouped = {};
+  
+  Object.entries(externalMap).forEach(([songName, rankValue]) => {
+    if (!grouped[rankValue]) {
+      grouped[rankValue] = [];
+    }
+    grouped[rankValue].push(songName);
+  });
+  
+  return grouped;
+}
+
+/**
+ * Converts tied ranks to mean ranks (standard ranking approach)
+ * 
+ * Example:
+ *   [1, 1, 1, 4, 5, 5] becomes [2, 2, 2, 4, 5.5, 5.5]
+ *   Three songs tied for 1st occupy positions 1-3, avg = 2
+ *   Two songs tied for 5th occupy positions 5-6, avg = 5.5
+ * 
+ * This maintains the full 1-N scale across all songs
+ */
+function convertTiesToMeanRanks(externalMap) {
+  const grouped = groupSongsByRank(externalMap);
+  const sortedRanks = Object.keys(grouped)
+    .map(Number)
+    .sort((a, b) => a - b);
+  
+  let currentPosition = 1; // Absolute position counter
+  
+  sortedRanks.forEach(rankValue => {
+    const tiedSongs = grouped[rankValue];
+    const tieCount = tiedSongs.length;
+    
+    // Calculate mean rank for this tie group
+    // If 3 songs tied at positions 1-3: meanRank = (1+2+3)/3 = 2
+    const meanRank = (currentPosition + currentPosition + tieCount - 1) / 2;
+    
+    // Assign mean rank to all songs in this tie group
+    tiedSongs.forEach(songName => {
+      externalMap[songName] = meanRank;
+    });
+    
+    // Move position counter forward by number of tied songs
+    currentPosition += tieCount;
+  });
+  
+  return externalMap;
+}
+
+/**
+ * Detects if a user's pasted rankings contain ties
+ * Returns: { hasTies: boolean, tieCount: number, summary: string }
+ */
+function analyzeTies(externalMap) {
+  const grouped = groupSongsByRank(externalMap);
+  const tiedGroups = Object.values(grouped).filter(arr => arr.length > 1);
+  
+  if (tiedGroups.length === 0) {
+    return { hasTies: false, tieCount: 0, summary: "No ties detected" };
+  }
+  
+  const totalTiedSongs = tiedGroups.reduce((sum, group) => sum + group.length, 0);
+  
+  return {
+    hasTies: true,
+    tieCount: tiedGroups.length,
+    totalTiedSongs: totalTiedSongs,
+    summary: `${tiedGroups.length} tie groups affecting ${totalTiedSongs} songs`
+  };
+}
+
+/**
  * Parses text, finds next column, uses user name as header.
+ * latest change: account for ties by doing a mean ranking between them
  */
 function processPastedText(text, userName) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -170,6 +248,7 @@ function processPastedText(text, userName) {
 
   sheet.getRange(1, targetColIndex).setValue(userName);
 
+  // Parse rankings from text
   const lines = text.split('\n');
   const externalMap = {};
   const regex = /^(\d+)\.\s+(.+?)\s+-\s+(.+)$/;
@@ -181,14 +260,48 @@ function processPastedText(text, userName) {
     }
   });
 
+  // Check for ties and convert if needed
+  const tieAnalysis = analyzeTies(externalMap);
+  
+  if (tieAnalysis.hasTies) {
+    // Build tie summary message
+    let tieMessage = `⚠️  Ties detected in ${userName}'s rankings!\n\n`;
+    tieMessage += `${tieAnalysis.groups.length} tie group(s):\n`;
+    
+    tieAnalysis.groups.forEach(group => {
+      tieMessage += `\n  Rank ${group.rank}: ${group.songs.join(', ')}\n`;
+    });
+    
+    tieMessage += `\nConverting tied ranks to mean ranks (standard statistical method).\n` +
+                  `Example: 3 songs tied at rank 1 → all become rank 2.0\n` +
+                  `         2 songs tied at rank 5 → both become rank 5.5\n\n` +
+                  `This preserves the full 1-${Object.keys(externalMap).length} scale.`;
+    
+    ui.alert(tieMessage);
+    
+    // Convert ties to mean ranks
+    convertTiesToMeanRanks(externalMap);
+  }
+
+  // Get song names from sheet for matching
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   const songNamesInSheet = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
-  const outputColumn = songNamesInSheet.map(row => [externalMap[row[0].toString().trim()] || ""]);
+  
+  // Map the (now converted) mean ranks to sheet songs
+  const outputColumn = songNamesInSheet.map(row => [
+    externalMap[row[0].toString().trim()] || ""
+  ]);
 
   sheet.getRange(2, targetColIndex, outputColumn.length, 1).setValues(outputColumn);
+  
   sortByPoints();
-  ss.toast("Scores updated for " + userName);
+  
+  if (tieAnalysis.hasTies) {
+    ss.toast(`✅ ${userName} added with ${tieAnalysis.totalTiedSongs} tied songs converted to mean ranks`);
+  } else {
+    ss.toast(`✅ ${userName} added with ${Object.keys(externalMap).length} songs`);
+  }
 }
 
 /**
@@ -404,6 +517,8 @@ function syncFromInbox() {
     if (!userName) continue;
 
     let parsedRows = [];
+    const rankMap = {}; // For tie conversion
+    
     for (let row = 1; row < fullData.length; row++) {
       let cellValue = String(fullData[row][col]).trim();
       if (!cellValue) continue;
@@ -412,12 +527,25 @@ function syncFromInbox() {
       lines.forEach(line => {
         let match = line.trim().match(regex);
         if (match) {
-          parsedRows.push({
-            originalRank: parseInt(match[1]),
-            songName: match[2].trim()
-          });
+          const songName = match[2].trim();
+          const rank = parseInt(match[1]);
+          parsedRows.push({ originalRank: rank, songName: songName });
+          rankMap[songName] = rank;
         }
       });
+    }
+
+    // Convert ties to mean ranks
+    const tieAnalysis = analyzeTies(rankMap);
+    if (tieAnalysis.hasTies) {
+      convertTiesToMeanRanks(rankMap);
+      
+      // Update parsedRows with mean ranks
+      parsedRows.forEach(item => {
+        item.originalRank = rankMap[item.songName];
+      });
+      
+      addLog(userName, 'Ties Converted', `${tieAnalysis.totalTiedSongs} songs converted to mean ranks`);
     }
 
     if (parsedRows.length > 0) {
@@ -504,8 +632,11 @@ function syncFromInbox() {
       let lastOrigRank = -1;
 
       matchedSongs.forEach(item => {
-        if (item.originalRank > lastOrigRank) currentRelRank++;
-        relativeMap[item.sheetName] = currentRelRank;
+        if (item.originalRank > lastOrigRank) {
+          currentRelRank++;
+        }
+        // Keep decimals for accuracy (2.0, 5.5, etc.)
+        relativeMap[item.sheetName] = item.originalRank;
         lastOrigRank = item.originalRank;
       });
 
