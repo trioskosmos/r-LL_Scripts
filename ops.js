@@ -3,6 +3,7 @@
  */
 const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
 
+
 /**
  * Perform divergence analysis across all group sheets.
  */
@@ -313,6 +314,58 @@ function runHotTakesAnalysis() {
  */
 
 /**
+ * Helper to alculate controversy index combining relative variability + polarization
+ * 
+ * Returns:
+ * - stdDev: absolute disagreement
+ * - mean: central tendency (average rank)
+ * - cv: Coefficient of Variation (stdDev/mean, scale-invariant)
+ * - iqr: Interquartile range (middle 50% spread)
+ * - bimodalityIndicator: 1.5x if polarized, 1.0x if scattered
+ * - controversyScore: final composite (cv * bimodalityIndicator)
+ */
+function controversyIndex(ranks) {
+  if (ranks.length < 2) {
+    return { stdDev: 0, mean: 0, cv: 0, iqr: 0, bimodalityIndicator: 1, controversyScore: 0 };
+  }
+
+  // Basic stats
+  const mean = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+  const variance = ranks.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / ranks.length;
+  const stdDev = Math.sqrt(variance);
+
+  // Coefficient of Variation: relative variability (stdDev / mean)
+  // Now top-10 songs show as more controversial than bottom songs with same stdDev
+  const cv = mean > 0 ? stdDev / mean : 0;
+
+  // Quartile analysis: detect if split into two camps vs scattered
+  const sorted = [...ranks].sort((a, b) => a - b);
+  const q1Index = Math.floor(sorted.length * 0.25);
+  const q3Index = Math.floor(sorted.length * 0.75);
+  const q1 = sorted[q1Index];
+  const q3 = sorted[q3Index];
+  const iqr = q3 - q1;
+
+  // Bimodality indicator:
+  // If IQR is large relative to mean, users are polarized into camps
+  // Otherwise they're just scattered randomly
+  const bimodalityRatio = mean > 0 ? iqr / mean : 0;
+  const bimodalityIndicator = bimodalityRatio > 0.3 ? 1.5 : 1.0;
+
+  // Final composite score
+  const controversyScore = cv * bimodalityIndicator;
+
+  return {
+    stdDev,
+    mean,
+    cv: parseFloat(cv.toFixed(4)),
+    iqr: parseFloat(iqr.toFixed(2)),
+    bimodalityIndicator,
+    controversyScore: parseFloat(controversyScore.toFixed(4))
+  };
+}
+
+/**
  * MAIN: Runs all "More Analysis" features - displays 2 per row
  */
 function runMoreAnalysis() {
@@ -439,134 +492,161 @@ function displayFeaturePair(sheet, startRow, feature1, feature2, col1, col2) {
  * Helper: Collect all song data from "All Songs" tab only
  */
 function collectAllSongData(configs, ss) {
-    const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
-    const songs = {};
-    const userRanks = {};
+  const NON_USER_COLUMNS = ['Rank', 'Song', 'Points', 'Average'];
+  const songs = {};
+  const userRanks = {};
+  
+  // Read from "All Songs" tab
+  const allSongsSheet = ss.getSheetByName('All Songs');
+  if (!allSongsSheet) return { songs, userRanks };
+  
+  const data = allSongsSheet.getDataRange().getValues();
+  if (data.length < 2) return { songs, userRanks };
+  
+  const headers = data[0];
+  const rows = data.slice(1);
+  
+  const userCols = [];
+  headers.forEach((h, idx) => {
+    if (!NON_USER_COLUMNS.includes(h) && h !== "") {
+      const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
+      if (hasData) userCols.push({ name: h, index: idx });
+    }
+  });
+  
+  rows.forEach(row => {
+    const songName = String(row[1]);
     
-    // Read ONLY from "All Songs" tab
-    const allSongsSheet = ss.getSheetByName('All Songs');
-    if (!allSongsSheet) return { songs, userRanks };
+    if (!songs[songName]) {
+      songs[songName] = { ranks: [] };
+    }
     
-    const data = allSongsSheet.getDataRange().getValues();
-    if (data.length < 2) return { songs, userRanks };
-    
-    const headers = data[0];
-    const rows = data.slice(1);
-    
-    const userCols = [];
-    headers.forEach((h, idx) => {
-        if (!NON_USER_COLUMNS.includes(h) && h !== "") {
-            const hasData = rows.some(r => r[idx] !== "" && !isNaN(parseFloat(r[idx])));
-            if (hasData) userCols.push({ name: h, index: idx });
-        }
-    });
-    
-    rows.forEach(row => {
-        const songName = String(row[1]);
+    userCols.forEach(u => {
+      const rank = parseFloat(row[u.index]);
+      if (!isNaN(rank)) {
+        songs[songName].ranks.push({ user: u.name, rank: rank });
         
-        if (!songs[songName]) {
-            songs[songName] = { ranks: [] };
-        }
-        
-        userCols.forEach(u => {
-            const rank = parseFloat(row[u.index]);
-            if (!isNaN(rank)) {
-                songs[songName].ranks.push({ user: u.name, rank: rank });
-                
-                if (!userRanks[u.name]) userRanks[u.name] = [];
-                userRanks[u.name].push(rank);
-            }
-        });
+        if (!userRanks[u.name]) userRanks[u.name] = [];
+        userRanks[u.name].push(rank);
+      }
     });
+  });
+  
+  // Calculate stats for songs
+  Object.keys(songs).forEach(songName => {
+    const ranks = songs[songName].ranks.map(r => r.rank);
+    const avg = ranks.reduce((a, b) => a + b, 0) / ranks.length;
     
-    // Calculate stats for songs
-    Object.keys(songs).forEach(songName => {
-        const ranks = songs[songName].ranks.map(r => r.rank);
-        const avg = ranks.reduce((a, b) => a + b, 0) / ranks.length;
-        const variance = ranks.reduce((sum, r) => sum + Math.pow(r - avg, 2), 0) / ranks.length;
-        const stdDev = Math.sqrt(variance);
-        
-        songs[songName].avgRank = avg;
-        songs[songName].stdDev = stdDev;
-        songs[songName].min = Math.min(...ranks);
-        songs[songName].max = Math.max(...ranks);
-        songs[songName].count = ranks.length;
-    });
+    // NEW: Use controversy index instead of raw stdDev
+    const controversy = controversyIndex(ranks);
     
-    return { songs, userRanks };
+    songs[songName].avgRank = avg;
+    songs[songName].stdDev = controversy.stdDev;
+    songs[songName].cv = controversy.cv;                           // NEW
+    songs[songName].iqr = controversy.iqr;                         // NEW
+    songs[songName].bimodalityIndicator = controversy.bimodalityIndicator; // NEW
+    songs[songName].controversyScore = controversy.controversyScore; // NEW
+    songs[songName].min = Math.min(...ranks);
+    songs[songName].max = Math.max(...ranks);
+    songs[songName].count = ranks.length;
+  });
+  
+  return { songs, userRanks };
 }
 
 // ============================================
 // FEATURE 1: MOST CONTROVERSIAL SONGS
 // ============================================
 function getMostControversialSongs(allData) {
-    const topN = 20;
+  const topN = 20;
 
-    const controversial = Object.keys(allData.songs)
-        .map(songName => ({
-            song: songName,
-            stdDev: allData.songs[songName].stdDev,
-            avgRank: allData.songs[songName].avgRank,
-            min: allData.songs[songName].min,
-            max: allData.songs[songName].max
-        }))
-        .sort((a, b) => b.stdDev - a.stdDev)
-        .slice(0, topN);
+  // Sort by controversyScore (CV * bimodality), not raw stdDev
+  const controversial = Object.keys(allData.songs)
+    .map(songName => {
+      const song = allData.songs[songName];
+      return {
+        song: songName,
+        stdDev: song.stdDev,
+        cv: song.cv,
+        controversyScore: song.controversyScore,
+        bimodalityIndicator: song.bimodalityIndicator,
+        avgRank: song.avgRank,
+        iqr: song.iqr,
+        min: song.min,
+        max: song.max
+      };
+    })
+    .sort((a, b) => b.controversyScore - a.controversyScore)
+    .slice(0, topN);
 
-    const rows = controversial.map((item, idx) => [
-        idx + 1,
-        item.song,
-        item.stdDev.toFixed(2),
-        item.avgRank.toFixed(1),
-        `${item.min}-${item.max}`
-    ]);
+  const rows = controversial.map((item, idx) => [
+    idx + 1,
+    item.song,
+    item.controversyScore.toFixed(3),  // Primary metric now
+    item.avgRank.toFixed(1),
+    `${item.min}-${item.max}`,
+    item.cv.toFixed(3)                 // Show CV for context
+  ]);
 
-    const rowBgColors = rows.map(row => {
-        const disagreement = parseFloat(row[2]);
-        if (disagreement > 30) return '#ffcccc';
-        else if (disagreement > 20) return '#ffdddd';
-        return '#ffffff';
-    });
+  // Color code by controversy TYPE:
+  // Red = high CV + bimodal (true polarization)
+  // Orange = high CV but scattered
+  // Yellow = low CV (consensus)
+  const rowBgColors = rows.map((row, idx) => {
+    const score = parseFloat(row[2]);
+    const bimodal = controversial[idx].bimodalityIndicator > 1.2;
+    
+    if (score > 0.15 && bimodal) return '#ff9999';      // Polarized
+    else if (score > 0.15) return '#ffcccc';             // Scattered
+    else if (score > 0.08) return '#ffdddd';             // Moderate
+    return '#ffffff';                                     // Consensus
+  });
 
-    return {
-        title: 'MOST CONTROVERSIAL SONGS (highest std deviation songs (disagreement))',
-        titleColor: '#c00000',
-        headers: [['Rank', 'Song', 'Disagreement', 'Avg Rank', 'Range (Min-Max)']],
-        headerBgColor: '#ffe6e6',
-        rows: rows,
-        rowBgColors: rowBgColors
-    };
+  return {
+    title: '🔥 MOST CONTROVERSIAL SONGS (Coefficient of Variation + Polarization)',
+    titleColor: '#c00000',
+    headers: [['Rank', 'Song', 'Controversy Score', 'Avg Rank', 'Range', 'CV']],
+    headerBgColor: '#ffe6e6',
+    rows: rows,
+    rowBgColors: rowBgColors
+  };
 }
 
 // ============================================
 // FEATURE 2: MOST CONSISTENTLY RANKED
 // ============================================
 function getMostConsistentlyRanked(allData) {
-    const consistent = Object.keys(allData.songs)
-        .map(songName => ({
-            song: songName,
-            stdDev: allData.songs[songName].stdDev,
-            avgRank: allData.songs[songName].avgRank,
-            count: allData.songs[songName].count
-        }))
-        .sort((a, b) => a.stdDev - b.stdDev)
-        .slice(0, 20);
+  const consistent = Object.keys(allData.songs)
+    .map(songName => {
+      const song = allData.songs[songName];
+      return {
+        song: songName,
+        stdDev: song.stdDev,
+        cv: song.cv,
+        controversyScore: song.controversyScore,
+        avgRank: song.avgRank,
+        count: song.count
+      };
+    })
+    .sort((a, b) => a.controversyScore - b.controversyScore)  // LOW controversy = high consistency
+    .slice(0, 20);
 
-    const rows = consistent.map((item, idx) => [
-        idx + 1,
-        item.song,
-        (100 - Math.min(item.stdDev * 5, 100)).toFixed(0) + '%',
-        item.avgRank.toFixed(1)
-    ]);
+  const rows = consistent.map((item, idx) => [
+    idx + 1,
+    item.song,
+    (100 - Math.min(item.controversyScore * 100, 100)).toFixed(0) + '%',  // Consistency %
+    item.avgRank.toFixed(1),
+    item.cv.toFixed(3)
+  ]);
 
-    return {
-        title: 'MOST CONSISTENTLY RANKED (lowest std deviation songs)',
-        titleColor: '#0066cc',
-        headers: [['Rank', 'Song', 'Consistency', 'Avg Rank']],
-        headerBgColor: '#cce5ff',
-        rows: rows,
-        rowBgColors: rows.map(() => '#e6f2ff')
-    };
+  return {
+    title: '✅ MOST CONSISTENTLY RANKED (Strong Consensus)',
+    titleColor: '#0066cc',
+    headers: [['Rank', 'Song', 'Consistency', 'Avg Rank', 'CV']],
+    headerBgColor: '#cce5ff',
+    rows: rows,
+    rowBgColors: rows.map(() => '#e6f2ff')
+  };
 }
 
 // ============================================
@@ -1247,6 +1327,60 @@ function getGradientColor(factor, min, max, startHex, endHex) {
 }
 
 /**
+ * Debug function to check All Songs tab values
+ * Run from Apps Script console to see actual cell values
+ */
+function debugTakes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allSongsSheet = ss.getSheetByName('All Songs');
+  const data = allSongsSheet.getDataRange().getValues();
+  const rows = data.slice(1);
+  
+  Logger.log("=== All Songs Tab Debug ===");
+  Logger.log(`Total rows: ${rows.length}`);
+  Logger.log("First 10 songs with user ranks:\n");
+  
+  // Headers for reference
+  const headers = data[0];
+  Logger.log(`Headers: ${headers.slice(0, 8).join(" | ")}\n`);
+  
+  // Check first 10 songs
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const songName = rows[i][1];
+    const points = parseFloat(rows[i][2]);
+    const avgRank = parseFloat(rows[i][3]); // Column D (Average)
+    
+    // Get first 3 user ranks (columns E, F, G = indices 4, 5, 6)
+    const user1 = parseFloat(rows[i][4]);
+    const user2 = parseFloat(rows[i][5]);
+    const user3 = parseFloat(rows[i][6]);
+    
+    Logger.log(`Song: ${songName}`);
+    Logger.log(`  Points: ${points}, Avg: ${avgRank}`);
+    Logger.log(`  User ranks: ${user1}, ${user2}, ${user3}`);
+    
+    // Calculate what Takes would show
+    const delta1 = user1 - avgRank;
+    const normalized1 = (delta1 / rows.length) * 100;
+    Logger.log(`  Example delta (User1): ${delta1.toFixed(2)}, Normalized: ${normalized1.toFixed(2)}%\n`);
+  }
+  
+  // Also check if any ranks are decimals (from mean rank conversion)
+  Logger.log("=== Checking for decimal ranks (from tie conversion) ===");
+  let decimalCount = 0;
+  for (let i = 0; i < Math.min(20, rows.length); i++) {
+    for (let j = 4; j < Math.min(11, data[0].length); j++) {
+      const val = parseFloat(rows[i][j]);
+      if (!isNaN(val) && val % 1 !== 0) {
+        Logger.log(`Found decimal: ${val} at row ${i+2}, col ${j+1}`);
+        decimalCount++;
+      }
+    }
+  }
+  Logger.log(`Total decimals found: ${decimalCount}`);
+}
+
+/**
  * MAIN: Runs ALL analysis functions in sequence.
  */
 function runAllAnalysis() {
@@ -1260,10 +1394,13 @@ function runAllAnalysis() {
         ss.toast("Error at opps analysis (check log)")
     }
     try {
-        runHotTakesAnalysis();
-        ss.toast("Hot takes and glazes analysis done")
+    runHotTakesAnalysis();
+    ss.toast("✅ Hot takes and glazes analysis done")
     } catch (e) {
-        ss.toast("Error at hot takes and glazes analysis (check log)")
+    const errorMsg = `❌ Hot Takes Error: ${e.message}\nStack: ${e.stack}`;
+    Logger.log(errorMsg);
+    //SpreadsheetApp.getUi().alert(errorMsg);
+    ss.toast("Error at hot takes and glazes analysis - check dialog and logs");
     }
     try {
         runMoreAnalysis();
